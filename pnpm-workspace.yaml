@@ -1,0 +1,9 @@
+packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: true
+
+# Vitest/Vite requires esbuild's reviewed native-binary install script.
+allowBuilds:
+  esbuild: true
