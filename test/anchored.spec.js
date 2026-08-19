@@ -27,6 +27,7 @@ import {
   canonicalizeJson,
   summarizeWithLlm,
   classifyAnchor,
+  lookupControlPolicyService,
   parseAnchorEnvelope,
   planCompaction,
   resolveCompactSpec,
@@ -1192,6 +1193,38 @@ describe('policy and anchor edge cases', () => {
     })
     const branchDefault = resolveCompactSpec(policy, 200_000, null)
     expect(branchDefault).toMatchObject({ thresholdTokens: 160_000, policySource: 'backend-default' })
+  })
+
+  it('reads the host-plane policy from ctx.root when the isolate get() cannot see it', async () => {
+    const policy = Object.freeze({
+      resolve: () => Object.freeze({ mode: 'percent', percent: 30, tokens: 128_000 }),
+    })
+    const root = {
+      get(name) {
+        return name === 'kuanfuCompactionPolicy' ? policy : undefined
+      },
+    }
+    const isolated = {
+      root,
+      get() {
+        return undefined
+      },
+    }
+    expect(lookupControlPolicyService(isolated)).toBe(policy)
+
+    const { ctx, engine } = harness(100_000, { retainTokens: 0 })
+    const originalGet = ctx.get.bind(ctx)
+    vi.spyOn(ctx, 'get').mockImplementation((name) => (
+      name === 'kuanfuCompactionPolicy' ? undefined : originalGet(name)
+    ))
+    ctx.root = {
+      get(name) {
+        return name === 'kuanfuCompactionPolicy' ? policy : originalGet(name)
+      },
+    }
+    const session = conversation(10, { text: `bulk ${'history '.repeat(6_000)}` })
+    await expect(engine.compactIfNeeded(owner(session), 'pressure', SIGNAL)).resolves.not.toBeNull()
+    expect(engine.calls.length).toBeGreaterThan(0)
   })
 
   it('applies control-plane thresholds only to pressure, never as a manual or overflow authorization gate', async () => {

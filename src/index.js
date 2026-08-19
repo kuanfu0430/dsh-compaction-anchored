@@ -366,7 +366,7 @@ export class AnchoredCompactionEngine extends CompactionEngine {
   }
 
   controlPolicy(session) {
-    const service = this.ctx.get('kuanfuCompactionPolicy')
+    const service = lookupControlPolicyService(this.ctx)
     if (service === undefined || typeof service.resolve !== 'function') return null
     try {
       const value = service.resolve(session)
@@ -386,6 +386,22 @@ export class AnchoredCompactionEngine extends CompactionEngine {
       return undefined
     }
   }
+}
+
+function lookupControlPolicyService(ctx) {
+  const seen = new Set()
+  for (const candidate of [ctx, ctx?.root, ctx?.reflect]) {
+    if (candidate === undefined || candidate === null || seen.has(candidate)) continue
+    seen.add(candidate)
+    if (typeof candidate.get !== 'function') continue
+    try {
+      const value = candidate.get('kuanfuCompactionPolicy')
+      if (value !== undefined && typeof value.resolve === 'function') return value
+    } catch {
+      // A rebound isolate context may refuse names outside its realm.
+    }
+  }
+  return undefined
 }
 
 function routedTarget(session) {
@@ -419,5 +435,6 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
 }
 
+export { lookupControlPolicyService }
 export { AnchoredCompactionEngine as BasicCompactionEngine }
 export default AnchoredCompactionEngine

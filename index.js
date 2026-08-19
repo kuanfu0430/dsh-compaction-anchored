@@ -2,6 +2,7 @@ export {
   AnchoredCompactionEngine,
   AnchoredCompactionEngine as BasicCompactionEngine,
   BACKEND_IDENTITY,
+  lookupControlPolicyService,
   default,
 } from './src/index.js'
 export {
