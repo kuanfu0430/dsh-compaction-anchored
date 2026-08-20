@@ -24,18 +24,30 @@ export function planCompaction(session, measurement, options = {}) {
   const last = lastVisibleSurfaceMessage(session)
   if (last === undefined) return null
 
+  const startIdx = anchor.kind === 'native' ? anchor.anchorIndex + 1 : anchor.anchorIndex
   const baseTailStart = requiredTailStart(session, last.index)
   if (baseTailStart <= anchor.anchorIndex) return null
-  const tailStartIdx = extendTail(
+  let tailStartIdx = extendTail(
     session,
     measurement,
     baseTailStart,
     anchor.anchorIndex + 1,
-    options.retainTokens ?? 0,
+    options.targetTailTokens ?? options.retainTokens ?? 0,
   )
+  if (options.maxProtectedTokens !== undefined
+    && protectedTokens(measurement, startIdx, tailStartIdx) > options.maxProtectedTokens) {
+    tailStartIdx = boundedTailStart(
+      session,
+      measurement,
+      last.index,
+      anchor.anchorIndex + 1,
+      options.retainTokens ?? 0,
+      options.targetTailTokens ?? options.retainTokens ?? 0,
+      options.maxProtectedTokens - fixedTokens(measurement) - tokensBefore(measurement, startIdx),
+    )
+  }
   if (tailStartIdx <= anchor.anchorIndex) return null
 
-  const startIdx = anchor.kind === 'native' ? anchor.anchorIndex + 1 : anchor.anchorIndex
   const endIdx = tailStartIdx - 1
   if (endIdx < startIdx) return null
   // Once an anchored envelope exists, replacing it without any newly accrued
@@ -88,9 +100,50 @@ export function planCompaction(session, measurement, options = {}) {
     shadowedSeqs,
     selectedNodes,
     shadowedTokenCount,
+    latestTurnSplit: tailStartIdx > baseTailStart,
     migration: anchor.kind === 'legacy',
     requestedRange: requested,
   })
+}
+
+function boundedTailStart(
+  session,
+  measurement,
+  hardLastIndex,
+  floorIndex,
+  retainTokens,
+  targetTailTokens,
+  maxTailTokens,
+) {
+  if (!Number.isSafeInteger(maxTailTokens) || maxTailTokens < 0) {
+    throw new PlanningError(
+      'protected-context',
+      'anchored compaction: protected prefix leaves no model-window budget for the final message',
+    )
+  }
+  let start = balanceTailStart(session, hardLastIndex, floorIndex)
+  let keptTokens = tokensFrom(measurement, start)
+  if (keptTokens > maxTailTokens) {
+    throw new PlanningError(
+      'protected-context',
+      `anchored compaction: the smallest balanced final-message tail needs ${keptTokens} tokens, budget is ${maxTailTokens}`,
+    )
+  }
+  while (start > floorIndex && keptTokens < targetTailTokens) {
+    const candidate = balanceTailStart(session, start - 1, floorIndex)
+    if (candidate >= start) break
+    const candidateTokens = tokensFrom(measurement, candidate)
+    if (candidateTokens > maxTailTokens) break
+    start = candidate
+    keptTokens = candidateTokens
+  }
+  if (keptTokens < retainTokens) {
+    throw new PlanningError(
+      'protected-context',
+      `anchored compaction: no balanced tail can retain ${retainTokens} tokens within the ${maxTailTokens}-token budget`,
+    )
+  }
+  return start
 }
 
 export function assertRequestedRangeExists(session, start, end) {
@@ -205,6 +258,21 @@ function tokensFrom(measurement, index) {
     total += measurement.nodes[cursor].tokens
   }
   return total
+}
+
+function tokensBefore(measurement, index) {
+  let total = 0
+  for (let cursor = 0; cursor < index; cursor += 1) total += measurement.nodes[cursor].tokens
+  return total
+}
+
+function protectedTokens(measurement, startIdx, tailStartIdx) {
+  return fixedTokens(measurement) + tokensBefore(measurement, startIdx) + tokensFrom(measurement, tailStartIdx)
+}
+
+function fixedTokens(measurement) {
+  const nodeTokens = measurement.nodes.reduce((sum, entry) => sum + entry.tokens, 0)
+  return Math.max(0, measurement.totalTokens - nodeTokens)
 }
 
 function assertMeasurementMatchesSurface(session, measurement) {

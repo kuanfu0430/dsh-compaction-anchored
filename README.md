@@ -7,7 +7,7 @@ This package is a compatibility fork of `@deepseek-ai/dsh-compaction-basic`. It 
 ## Hard invariants
 
 - **HEAD:** the first durable append-origin `user/message` that is not a compaction checkpoint is permanent. Its role and every content block are preserved byte-for-JSON-value; rich image blocks are never sent to the summarizer as editable output.
-- **LAST / TAIL:** the latest model-visible message and the current or most recent complete turn remain outside summary replacements. Tool-call/result boundaries are never split.
+- **LAST / TAIL:** the latest model-visible message always remains outside summary replacements, and tool-call/result boundaries are never split. The current or most recent complete turn is retained when it fits; an oversized single turn may be split only at a balanced boundary, with enough recent tail retained to keep both the summarization request and the resulting checkpoint inside the routed model window.
 - **MIDDLE only:** one continuous, tool-balanced range between HEAD and protected TAIL may be replaced.
 - **Legacy recovery:** a previously shadowed HEAD is reconstructed from the append-only log inside a deterministic version-1 envelope. Unknown or malformed envelopes fail before prune or summary side effects.
 - **Strict shrink:** the complete framed checkpoint, including an embedded rich HEAD, must estimate smaller than the complete shadowed range.

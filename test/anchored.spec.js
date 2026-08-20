@@ -5,6 +5,8 @@ import {
   CompactionId,
   compactCheckpointSource,
   isCompactCheckpointSource,
+  toolPairingBalancedAfter,
+  toolPairingBalancedBefore,
 } from '@deepseek-ai/dsh-compaction'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import LlmRuntime, {
@@ -302,6 +304,47 @@ describe('planner invariants', () => {
       return event.type === 'user/message' && event.data.content[0]?.text?.includes('turn 4')
     })
     expect(plan.tailStartIdx).toBeLessThanOrEqual(session.surface.nodes.indexOf(latestTurnUser))
+  })
+
+  it('splits an oversized latest turn only at a balanced boundary while preserving HEAD and LAST', () => {
+    const { ctx } = harness()
+    const session = conversation(2, {
+      open: false,
+      toolTurns: [2],
+      afterToolAssistantTurns: [2],
+      toolText: `oversized tool ${'payload '.repeat(4_000)}`,
+    })
+    const measurement = ctx.tokenMeter.measure(session)
+    const normal = planCompaction(session, measurement, { retainTokens: 0 })
+    const latestTurnUser = session.surface.nodes.find((seq) => {
+      const event = session.events[seq]
+      return event.type === 'user/message' && event.data.content[0]?.text?.includes('turn 2')
+    })
+    const hardLastIndex = session.surface.nodes.length - 1
+    const prefixTokens = measurement.nodes[0].tokens
+    const lastTokens = measurement.nodes[hardLastIndex].tokens
+    const split = planCompaction(session, measurement, {
+      retainTokens: 0,
+      maxProtectedTokens: prefixTokens + lastTokens,
+    })
+
+    expect(normal.tailStartIdx).toBeLessThanOrEqual(session.surface.nodes.indexOf(latestTurnUser))
+    expect(split.latestTurnSplit).toBe(true)
+    expect(split.shadowedSeqs).toContain(latestTurnUser)
+    expect(split.shadowedSeqs).not.toContain(classifyAnchor(session).headSeq)
+    expect(split.shadowedSeqs).not.toContain(session.surface.nodes.at(-1))
+    expect(toolPairingBalancedAfter(session, split.end)).toBe(true)
+    expect(toolPairingBalancedBefore(session, split.protectedTailSeqs[0])).toBe(true)
+
+    const fullTailTokens = measurement.nodes.slice(normal.tailStartIdx)
+      .reduce((sum, entry) => sum + entry.tokens, 0)
+    const fixedOverhead = 5_000
+    const inflated = { ...measurement, totalTokens: measurement.totalTokens + fixedOverhead }
+    const overheadSplit = planCompaction(session, inflated, {
+      retainTokens: 0,
+      maxProtectedTokens: prefixTokens + fullTailTokens + fixedOverhead - 1,
+    })
+    expect(overheadSplit.latestTurnSplit).toBe(true)
   })
 
   it('returns null for one turn, HEAD/LAST in the same turn, or no durable HEAD', () => {

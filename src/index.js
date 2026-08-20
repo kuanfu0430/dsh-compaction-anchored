@@ -141,11 +141,11 @@ export class AnchoredCompactionEngine extends CompactionEngine {
           assertNoActiveCompaction(agent.session, 'manual compaction')
           const targetState = await this.resolveTargetState(agent, operationSignal, 'manual')
           operationSignal.throwIfAborted()
-          const retainTokens = targetState?.spec.retainTokens ?? 0
+          let measurement = this.ctx.tokenMeter.measure(agent.session)
           const provisional = planCompaction(
             agent.session,
-            this.ctx.tokenMeter.measure(agent.session),
-            { retainTokens },
+            measurement,
+            planningOptions(targetState, measurement),
           )
           if (provisional === null) return null
           const eventCountBeforePrune = agent.session.events.length
@@ -168,10 +168,11 @@ export class AnchoredCompactionEngine extends CompactionEngine {
           }
           if (pruneFailure !== undefined) throw pruneFailure
           operationSignal.throwIfAborted()
+          measurement = this.ctx.tokenMeter.measure(agent.session)
           const finalPlan = planCompaction(
             agent.session,
-            this.ctx.tokenMeter.measure(agent.session),
-            { retainTokens },
+            measurement,
+            planningOptions(targetState, measurement),
           )
           if (finalPlan === null) return null
           return await this.execute(finalPlan, agent, targetState?.policy ?? this.policyForAgent(agent), {
@@ -287,7 +288,7 @@ export class AnchoredCompactionEngine extends CompactionEngine {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       signal.throwIfAborted()
       const provisional = planCompaction(agent.session, measurement, {
-        retainTokens: targetState.spec.retainTokens,
+        ...planningOptions(targetState, measurement, pendingTokens),
       })
       if (provisional === null) return latest
       selectivePrune(this.ctx, agent.session, provisional, trigger, signal)
@@ -296,7 +297,7 @@ export class AnchoredCompactionEngine extends CompactionEngine {
       if (trigger === 'pressure'
         && measurement.totalTokens + pendingTokens < targetState.spec.thresholdTokens) return latest
       const finalPlan = planCompaction(agent.session, measurement, {
-        retainTokens: targetState.spec.retainTokens,
+        ...planningOptions(targetState, measurement, pendingTokens),
       })
       if (finalPlan === null) return latest
       latest = await this.execute(finalPlan, agent, targetState.policy, {
@@ -385,6 +386,32 @@ export class AnchoredCompactionEngine extends CompactionEngine {
       }
       return undefined
     }
+  }
+}
+
+function planningOptions(targetState, measurement, _projectedExtraTokens = 0, extra = {}) {
+  if (targetState === null) return { retainTokens: 0, ...extra }
+  if (measurement.totalTokens <= targetState.spec.safeThresholdTokens) {
+    return { retainTokens: targetState.spec.retainTokens, ...extra }
+  }
+  const desiredTailTokens = Math.max(
+    targetState.spec.retainTokens,
+    measurement.totalTokens - targetState.spec.safeThresholdTokens,
+  )
+  const checkpointReserve = Math.min(
+    targetState.policy.maxTokens,
+    Math.floor(targetState.spec.contextWindow * 0.1),
+  )
+  const maxProtectedTokens = targetState.spec.contextWindow - checkpointReserve
+  const targetTailCap = Math.max(
+    targetState.spec.retainTokens,
+    targetState.spec.thresholdTokens - checkpointReserve,
+  )
+  return {
+    retainTokens: targetState.spec.retainTokens,
+    targetTailTokens: Math.min(desiredTailTokens, targetTailCap),
+    maxProtectedTokens,
+    ...extra,
   }
 }
 
