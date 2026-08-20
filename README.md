@@ -69,7 +69,7 @@ The summarizer receives HEAD as read-only authority plus MIDDLE history and must
 6. `## Open Issues and Risks`
 7. `## Exact Next Step`
 
-Only text output is accepted. Blank, truncated, oversized, reordered, or extra-section output does not create a summary replacement.
+Only text blocks are stored in the checkpoint. Provider-native reasoning blocks may accompany the answer and are discarded before validation; every other non-text block is rejected. Blank, truncated, oversized, reordered, or extra-section output does not create a summary replacement.
 
 ## Development
 

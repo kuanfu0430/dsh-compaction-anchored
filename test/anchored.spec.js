@@ -843,7 +843,7 @@ describe('summary structure validation', () => {
     for (const heading of REQUIRED_SECTIONS) expect(COMPACTION_INSTRUCTION).toContain(heading)
   })
 
-  it('uses one replay-aware compaction stream, forwards cancellation, and rejects non-text output', async () => {
+  it('uses one replay-aware compaction stream, forwards cancellation, and strips provider reasoning', async () => {
     const ctx = new Context()
     void new LlmRuntime(ctx)
     void new SessionStore(ctx)
@@ -874,12 +874,31 @@ describe('summary structure validation', () => {
     expect(adapter.lastOptions.messages.at(-1).content[0].text).toBe(COMPACTION_INSTRUCTION)
     expect(adapter.lastOptions.tools).toEqual(input.tools)
 
-    adapter.blocks = [{ type: 'reasoning', text: 'private' }, ...validSummary('unsafe')]
+    adapter.blocks = [{ type: 'reasoning', text: 'private' }, ...validSummary('reasoned')]
+    const reasoned = await summarizeWithLlm(ctx, {
+      summarizationProvider: '',
+      summarizationModel: '',
+      maxTokens: 321,
+    }, input, owner(session), SIGNAL)
+    expect(reasoned.summary).toEqual(validSummary('reasoned'))
+    expect(reasoned.rawOutput).toEqual([
+      { type: 'reasoning', text: 'private' },
+      ...validSummary('reasoned'),
+    ])
+
+    adapter.blocks = [{ type: 'reasoning', text: 'private only' }]
     await expect(summarizeWithLlm(ctx, {
       summarizationProvider: '',
       summarizationModel: '',
       maxTokens: 321,
     }, input, owner(session), SIGNAL)).rejects.toThrow(/text blocks only/)
+
+    adapter.blocks = [{ type: 'image', mediaType: 'image/png', data: 'unsafe' }, ...validSummary('unsafe')]
+    await expect(summarizeWithLlm(ctx, {
+      summarizationProvider: '',
+      summarizationModel: '',
+      maxTokens: 321,
+    }, input, owner(session), SIGNAL)).rejects.toThrow(/text and provider reasoning blocks/)
   })
 })
 
