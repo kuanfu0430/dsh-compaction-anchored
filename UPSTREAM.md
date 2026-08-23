@@ -37,7 +37,7 @@ This repository is a focused compatibility fork of DeepSeek Harness compaction-b
 For every upstream revision:
 
 1. Diff compaction engine, region transaction, compaction/session invariants, tool pairing, token meter, pruner, agent event payloads, and preset loader behavior from the baseline commit.
-2. Keep this package's `@deepseek-ai/dsh-*` peers exact and update `BACKEND_IDENTITY.harness` only after compatibility work.
+2. Keep this package's `@deepseek-ai/dsh-*` peers bounded to the reviewed API family. Update `BACKEND_IDENTITY.testedHarness` only after the full suite and the plugin-library runtime contract probe pass.
 3. Rerun `pnpm check`, the full fault suite, a frozen clean install, preset identity checks, real pressure/manual/overflow conversations, cold restore, restart, uninstall, and rollback.
 4. Never merge an upstream change that permits HEAD, LAST, or required TAIL messages to enter a replacement or prune range.
 

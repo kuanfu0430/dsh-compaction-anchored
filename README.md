@@ -1,6 +1,6 @@
 # @kuanfu0430/dsh-compaction-anchored
 
-Anchor-preserving compaction backend for DeepSeek Harness `0.1.0-rc.7`.
+Contract-checked anchor-preserving compaction backend for DeepSeek Harness.
 
 This package is a compatibility fork of `@deepseek-ai/dsh-compaction-basic`. It keeps the first durable append-origin, non-checkpoint `user/message` and the latest model-visible message complete, summarizes only the continuous middle, and makes pressure, canonical overflow, manual `/compact`, and `compactRegion()` use one planner and transaction path.
 
@@ -19,11 +19,12 @@ Selective tool-result pruning is model-free and durable. Normal pressure may pru
 
 | Component | Supported version |
 | --- | --- |
-| DeepSeek Harness | `0.1.0-rc.7` |
+| DeepSeek Harness peer range | `>=0.1.0-rc.7 <0.2.0` |
+| Latest contract-tested version | `0.1.1-rc.2` |
 | Upstream source baseline | `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca` |
 | Node.js | `^22.19.0 || >=24.0.0` |
 
-All `@deepseek-ai/dsh-*` peer dependencies are intentionally exact. Upgrade only after rerunning the anchor, transaction, fault, cold-restore, trigger, and runtime suites. See `UPSTREAM.md`.
+The peer range is deliberately bounded to the current pre-1.0 API family. Every newly adopted Harness release must rerun the anchor, transaction, fault, cold-restore, trigger, and runtime suites, and the plugin-library installer must execute its backend contract probe before restart. See `UPSTREAM.md`.
 
 ## Installation
 

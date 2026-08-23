@@ -20,8 +20,10 @@ import { assertNoActiveCompaction, executeCompaction } from './transaction.js'
 
 export const BACKEND_IDENTITY = Object.freeze({
   name: '@kuanfu0430/dsh-compaction-anchored',
-  version: '0.1.0',
-  harness: '0.1.0-rc.7',
+  version: '0.2.0',
+  contract: 'dsh-compaction-engine-v1',
+  harnessRange: '>=0.1.0-rc.7 <0.2.0',
+  testedHarness: '0.1.1-rc.2',
   anchored: true,
 })
 

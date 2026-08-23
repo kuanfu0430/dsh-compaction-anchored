@@ -1171,8 +1171,10 @@ describe('policy and anchor edge cases', () => {
   it('publishes a frozen backend identity and safety-caps every pressure policy', () => {
     expect(BACKEND_IDENTITY).toEqual({
       name: '@kuanfu0430/dsh-compaction-anchored',
-      version: '0.1.0',
-      harness: '0.1.0-rc.7',
+      version: '0.2.0',
+      contract: 'dsh-compaction-engine-v1',
+      harnessRange: '>=0.1.0-rc.7 <0.2.0',
+      testedHarness: '0.1.1-rc.2',
       anchored: true,
     })
     expect(Object.isFrozen(BACKEND_IDENTITY)).toBe(true)
