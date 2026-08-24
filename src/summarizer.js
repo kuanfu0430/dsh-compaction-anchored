@@ -91,7 +91,7 @@ export async function summarizeWithLlm(ctx, config, input, agent, signal) {
   const terminalError = finishError(assembler.finish)
   if (terminalError !== undefined) throw terminalError
   const rawOutput = assembler.blocks()
-  const summary = validateSummary(rawOutput)
+  const summary = validateProviderOutput(rawOutput)
   return {
     summary,
     rawOutput,
@@ -101,6 +101,14 @@ export async function summarizeWithLlm(ctx, config, input, agent, signal) {
     maxTokens: config.maxTokens,
     ...assembler.usage === undefined ? {} : { usage: assembler.usage },
   }
+}
+
+function validateProviderOutput(blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0
+    || blocks.some((block) => block?.type !== 'text' && block?.type !== 'reasoning')) {
+    throw new Error('anchored compaction: summary output may contain only text and provider reasoning blocks')
+  }
+  return validateSummary(blocks.filter((block) => block.type === 'text'))
 }
 
 export function validateSummary(blocks) {
