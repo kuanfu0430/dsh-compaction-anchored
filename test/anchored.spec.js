@@ -863,6 +863,44 @@ describe('selective pruning and triggers', () => {
     expect(engine.calls).toHaveLength(0)
     expect(session.events.some((event) => event.type.startsWith('compaction/'))).toBe(false)
   })
+
+  it('records one no-op diagnostic when pressure is stuck without a compactable middle', async () => {
+    const { ctx, engine } = harness(1_000, { auto: true, thresholdRatio: 0.3, retainTokens: 0 })
+    const session = conversation(1, { text: `stuck ${'history '.repeat(2_000)}` })
+    // 前提：單一回合 token 已超門檻（300），但 HEAD 與 TAIL 同回合、中段為空。
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeGreaterThan(300)
+    const step = () => agentEvents(ctx, owner(session)).waterfall(
+      'agent/pre-step',
+      { messages: [], turn: 2, step: 1, signal: SIGNAL },
+      () => Promise.resolve({ kind: 'enter', messages: [] }),
+    )
+    const first = await step()
+    expect(first.kind).toBe('enter')
+    expect(engine.calls).toHaveLength(0)
+    const noOps = session.events.filter((event) => event.type === 'compaction/no-op')
+    expect(noOps).toHaveLength(1)
+    expect(noOps[0].data.reason).toBe('no-middle')
+    expect(noOps[0].data.trigger).toBe('pressure')
+    expect(noOps[0].data.totalTokens).toBeGreaterThanOrEqual(noOps[0].data.thresholdTokens)
+    // 第二次 pre-step 仍卡住也不重複洗版。
+    const second = await step()
+    expect(second.kind).toBe('enter')
+    expect(session.events.filter((event) => event.type === 'compaction/no-op')).toHaveLength(1)
+  })
+
+  it('does not record no-op when pruning already made progress', async () => {
+    const { ctx, engine } = harness(10_000, { thresholdRatio: 0.3, retainTokens: 0 })
+    void new ToolResultPruner(ctx, { thresholdChars: 80, headChars: 20, tailChars: 20 })
+    const session = conversation(4, {
+      text: 'short',
+      toolTurns: [2],
+      toolText: `oversized ${'x'.repeat(30_000)}`,
+    })
+    const result = await engine.compactIfNeeded(owner(session), 'pressure', SIGNAL)
+    expect(result).toBeNull()
+    expect(session.events.some((event) => event.type === 'compaction/prune')).toBe(true)
+    expect(session.events.some((event) => event.type === 'compaction/no-op')).toBe(false)
+  })
 })
 
 describe('summary structure validation', () => {
@@ -1066,6 +1104,10 @@ describe('transaction faults and concurrency', () => {
     const flush = vi.spyOn(ctx.sessions, 'flush')
     await expect(engine.compactNow(owner(session), SIGNAL)).resolves.toBeNull()
     expect(session.events.some((event) => event.type === 'compaction/start')).toBe(false)
+    const noOps = session.events.filter((event) => event.type === 'compaction/no-op')
+    expect(noOps).toHaveLength(1)
+    expect(noOps[0].data.reason).toBe('no-middle')
+    expect(noOps[0].data.trigger).toBe('manual')
     expect(flush).not.toHaveBeenCalled()
     flush.mockRestore()
   })
@@ -1233,7 +1275,7 @@ describe('policy and anchor edge cases', () => {
   it('publishes a frozen backend identity and safety-caps every pressure policy', () => {
     expect(BACKEND_IDENTITY).toEqual({
       name: '@kuanfu0430/dsh-compaction-anchored',
-      version: '0.2.0',
+      version: '0.2.1',
       contract: 'dsh-compaction-engine-v1',
       harnessRange: '>=0.1.0-rc.7 <0.2.0',
       testedHarness: '0.1.1-rc.2',

@@ -1,6 +1,6 @@
 {
   "name": "@kuanfu0430/dsh-compaction-anchored",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Contract-checked anchor-preserving compaction backend for DeepSeek Harness",
   "type": "module",
   "main": "./index.js",

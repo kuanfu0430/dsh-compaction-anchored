@@ -6,6 +6,7 @@ import {
 import {
   CONTEXT_WINDOW_EXCEEDED_CODE,
 } from '@deepseek-ai/dsh-llm'
+import { classifyAnchor } from './anchor.js'
 import {
   normalizeControlPolicy,
   resolveCompactSpec,
@@ -20,7 +21,7 @@ import { assertNoActiveCompaction, executeCompaction } from './transaction.js'
 
 export const BACKEND_IDENTITY = Object.freeze({
   name: '@kuanfu0430/dsh-compaction-anchored',
-  version: '0.2.0',
+  version: '0.2.1',
   contract: 'dsh-compaction-engine-v1',
   harnessRange: '>=0.1.0-rc.7 <0.2.0',
   testedHarness: '0.1.1-rc.2',
@@ -72,6 +73,9 @@ export class AnchoredCompactionEngine extends CompactionEngine {
     this.warnedPolicySessions = new WeakSet()
     this.overflowRetries = new WeakMap()
     this.overflowAgents = new WeakMap()
+    // session → append 過 stuck no-op 事件時的 surface.replaceGeneration。
+    // 同一世代只記一次，避免每個 pre-step 洗 durable log；session 回收時自動釋放。
+    this.stuckNoOp = new WeakMap()
     if (this.config.auto) this.registerAutomaticCompaction()
   }
 
@@ -149,7 +153,10 @@ export class AnchoredCompactionEngine extends CompactionEngine {
             measurement,
             planningOptions(targetState, measurement),
           )
-          if (provisional === null) return null
+          if (provisional === null) {
+            this.recordStuckNoOp(agent, measurement, targetState, 'manual')
+            return null
+          }
           const eventCountBeforePrune = agent.session.events.length
           let pruneFailure
           try {
@@ -292,7 +299,12 @@ export class AnchoredCompactionEngine extends CompactionEngine {
       const provisional = planCompaction(agent.session, measurement, {
         ...planningOptions(targetState, measurement, pendingTokens),
       })
-      if (provisional === null) return latest
+      if (provisional === null) {
+        // 首輪即無 plan 且本輪零進展：門檻已達但無可壓縮中段。記一筆 durable
+        // 診斷事件讓控制面可顯示；有 prune 進展才回傳的路徑不記（prune 事件已說明）。
+        if (latest === null) this.recordStuckNoOp(agent, measurement, targetState, trigger)
+        return latest
+      }
       selectivePrune(this.ctx, agent.session, provisional, trigger, signal)
       signal.throwIfAborted()
       measurement = this.ctx.tokenMeter.measure(agent.session)
@@ -316,6 +328,38 @@ export class AnchoredCompactionEngine extends CompactionEngine {
       `anchored compaction remains above threshold after ${attempts} attempts `
       + `(${measurement.totalTokens + pendingTokens} projected tokens >= ${targetState.spec.thresholdTokens})`,
     )
+  }
+
+  /**
+   * 門檻已達但 planner 回 null（無可壓縮中段）時記一筆 durable 診斷事件。
+   * 只在零進展的首輪呼叫；同一 surface 世代只記一次；尚無合法 HEAD 的短暫
+   * 啟動狀態不記。事件僅帶數字（無訊息內容），log-only，不碰 surface。
+   */
+  recordStuckNoOp(agent, measurement, targetState, trigger) {
+    const session = agent?.session
+    if (session === undefined || session === null) return
+    const generation = session.surface?.replaceGeneration
+    if (!Number.isSafeInteger(generation)) return
+    if (this.stuckNoOp.get(session) === generation) return
+    let anchor
+    try {
+      anchor = classifyAnchor(session)
+    } catch {
+      return
+    }
+    if (anchor?.kind === 'missing') return
+    try {
+      session.append('compaction/no-op', {
+        reason: 'no-middle',
+        trigger,
+        totalTokens: measurement.totalTokens,
+        thresholdTokens: targetState.spec.thresholdTokens,
+      })
+    } catch {
+      // 診斷事件不得中斷回合；下一個 pre-step 會重試。
+      return
+    }
+    this.stuckNoOp.set(session, generation)
   }
 
   execute(plan, agent, policy, options, signal) {

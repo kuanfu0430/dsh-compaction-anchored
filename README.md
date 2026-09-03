@@ -15,6 +15,8 @@ This package is a compatibility fork of `@deepseek-ai/dsh-compaction-basic`. It 
 
 Selective tool-result pruning is model-free and durable. Normal pressure may prune only MIDDLE results; canonical provider overflow may additionally prune non-LAST tool results in TAIL. Every prune pass is followed by a fresh measurement and final plan.
 
+When automatic pressure or manual `/compact` is above threshold but the planner has no compactable middle (HEAD and TAIL occupy the same turn, or protected context already fills the window), the backend appends a log-only `compaction/no-op` event (`reason: 'no-middle'`, token counts only). It is recorded once per `surface.replaceGeneration` so pre-step cannot flood the durable log. Missing HEAD (first pending message) is not recorded. Control-plane chips can surface this instead of appearing idle.
+
 ## Compatibility
 
 | Component | Supported version |
